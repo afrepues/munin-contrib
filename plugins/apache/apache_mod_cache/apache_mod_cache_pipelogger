@@ -1,0 +1,57 @@
+#!/usr/bin/perl
+
+=head1
+
+# Log vhost port method cache-status
+<IfModule mod_cache.c>
+  CustomLog "|/usr/share/munin/apache_mod_cache_pipelogger" "%v %p %m %{cache-status}e"
+</IfModule>
+
+=cut
+
+use strict;
+
+use IPC::ShareLite ':lock';
+use Munin::Plugin;
+use Storable qw(freeze thaw);
+
+#---------------------------------------------------------------------
+#  C O N F I G
+#---------------------------------------------------------------------
+
+my $share = IPC::ShareLite->new(
+    -key       => 'mamc',
+    -create    => 1,
+    -destroy   => 1,
+    -exclusive => 0,
+    -mode      => '0660'
+) or die $!;
+
+while (<STDIN>) {
+    my ( $vhost, $protocol, $cache_status ) = split( /\s/, $_ );
+
+    # sanity check
+    next unless m/^[\d\w\.\-_]+\s\w+\s[\w-]+$/;
+
+    # sitename to munin fieldname
+    my $vpm = clean_fieldname($vhost);
+
+    $share->lock(LOCK_EX);
+
+    my $data = $share->fetch;
+    my %data =
+        ( $data eq "" )
+      ? ()
+      : %{ thaw($data) };
+
+    $data{$vpm}{'label'} = $vhost;
+
+    # count all requests
+    $data{$vpm}{'requests'}++;
+
+    # count by cache status
+    $data{$vpm}{'cache_status'}{$cache_status}++;
+
+    $share->store( freeze \%data );
+    $share->unlock;
+}

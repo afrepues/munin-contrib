@@ -1,0 +1,14 @@
+-*- mode: org -*-
+
+* Benchmark performance
+* Study alternative implementations not using SHM
+** 0MQ
+   - http://search.cpan.org/dist/Message-Passing-ZeroMQ/
+   - http://search.cpan.org/dist/ZeroMQ/
+   - http://zeromq.org/bindings:perl
+** Cache::FastMmap
+** forks::shared
+** IPC::Shareable
+   This one might not represent only and interface advantage, but
+   still, more legible code is better code.
+* Make a file-based log parser daemon as an alternative to the pipe-based

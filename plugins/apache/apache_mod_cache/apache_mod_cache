@@ -1,0 +1,198 @@
+#!/usr/bin/perl
+
+=head1 INSTALLATION
+
+This plugin requires data from Apache HTTPD. You can get at the data
+by installing the pipelogger:
+
+- Install /usr/share/munin/apache_mod_cache_pipelogger as executable for the
+  user and/or group Apache HTTPD runs under;
+
+- Configure Apache HTTPD to send data to the pipelogger by adding the
+  following snippet its configuration:
+
+    # Log vhost port method cache-status
+    <IfModule mod_cache.c>
+      CustomLog "|/usr/share/munin/apache_mod_cache_pipelogger" "$v %p %m %{cache-status}e"
+    </IfModule>
+
+The pipelogger stores data to RAM only, and is highly performant.
+
+Be aware that an Apache HTTPD CustomLog directive in the master config
+will only log those vhosts that have no directive of their own.
+
+Install plugin conf (after [apache_*])
+
+[apache_mod_cache]
+user root
+env.subgraphs requests
+
+# user		- necessary for the creation of shared memory IPC
+# subgraphs     - create multigraph subgraphs (watch your graphing performance...), default 0
+
+A word on performance: 
+
+- Requests/sec should not be much of a problem.  Pipelogger should not
+  have many performance problems, as it applies one regex per line and
+  adds some stats.
+
+- Stats are saved every n seconds (default: 7) to shared mem in
+  serialized format. That should be ok on the most loaded servers
+  (unless you watch cache logs).
+
+I would estimate that > 10k log lines/sec could start becoming a
+problem, you might have to start tuning there or use a dedicated
+system. You might think about splitting the logs over multiple
+Logparser scripts to parallelize and merge in larger intervals.
+
+Timeouts are another matter, munin-updates calls for the plugin-data
+and works on the received lines while the network timeout is
+running. So expect to set your timeouts to 120s with a hundred vhosts.
+
+=head1 MAGIC MARKERS
+
+  #%# family=auto
+  #%# capabilities=autoconf
+
+=head1 LICENSE
+
+GPLv2
+
+=cut
+
+use strict;
+
+use IPC::ShareLite ':lock';
+use Munin::Plugin;
+use Storable qw(freeze thaw);
+
+#---------------------------------------------------------------------
+#  C O N F I G
+#---------------------------------------------------------------------
+
+my %subgraphs = map { $_ => 1 }
+  ( ( $ENV{'subgraphs'} ) ? split( / /, $ENV{'subgraphs'} ) : () );
+
+my $data;
+my %data = ();
+
+# Retrieve data locking the shortest time possible to stay as much out
+# of the way of the accounting as possible.
+{
+    my $share = IPC::ShareLite->new(
+        -key       => 'mamc',
+        -create    => 0,
+        -destroy   => 0,
+        -exclusive => 0,
+        -mode      => '0660'
+    ) or die $!;
+    $share->lock(LOCK_EX);
+    $data = $share->fetch;
+    $share->store( freeze \%data );
+    $share->unlock()
+}
+
+%data = %{ thaw($data) }
+  unless ( $data eq "" );
+
+if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
+    if ( scalar( keys %data ) > 0 ) {
+        print "yes\n";
+        exit 0;
+    }
+    else {
+        print "no data available, apache_mode_cache_pipelogger not installed\n";
+        exit 0;
+    }
+}
+
+need_multigraph();
+
+#
+# config
+#
+
+if ( defined $ARGV[0] and $ARGV[0] eq "config" ) {
+
+    my $order = join( "_requests ", sort keys %data ) . "_requests";
+
+    print <<END;
+
+multigraph apache_mod_cache_requests
+graph_title requests processed through mod_cache by virtual host
+graph_args --base 1000
+graph_vlabel requests / \${graph_period}
+graph_category apache
+graph_period minute
+graph_order $order
+END
+
+    foreach my $site ( keys %data ) {
+
+        print <<END;
+${site}_requests.label $data{$site}{'label'}
+${site}_requests.info $site
+${site}_requests.draw LINE1
+${site}_requests.type GAUGE
+END
+
+    }    # end site
+
+    if ( $subgraphs{'requests'} ) {
+
+        #  multigraphs multivalue (caching statuses)
+        foreach my $site ( keys %data ) {
+            print <<END;
+
+multigraph apache_mod_cache_requests.$site
+graph_title cache statuses on $data{$site}{'label'}
+graph_args --base 1000
+graph_vlabel cache statuses / \${graph_period}
+graph_category apache
+graph_period minute
+END
+            my $draw = 'AREA';
+            foreach
+              my $cache_status ( sort keys %{ $data{$site}{'cache_status'} } )
+            {
+                print <<END;
+${site}_s${cache_status}.label status $cache_status
+${site}_s${cache_status}.info status $cache_status
+${site}_s${cache_status}.draw $draw
+${site}_s${cache_status}.type GAUGE
+END
+                $draw = 'STACK';
+            }    # end cache_status
+        }    # end sites
+    }    # end multigraph
+
+    exit 0;
+}    # end if config
+
+#
+# values: requests + subgraphs
+#
+
+print "\nmultigraph apache_mod_cache_requests\n";
+foreach my $site ( keys %data ) {
+    $data{$site}{'requests'} ||= 0;
+    print "${site}_requests.value $data{$site}{'requests'}\n";
+}    # end sites
+
+if ( $subgraphs{'requests'} ) {
+
+    # multigraphs multivalue (status codes)
+    foreach my $site ( keys %data ) {
+        print "\nmultigraph apache_mod_cache_requests.$site\n";
+        foreach my $cache_status ( sort keys %{ $data{$site}{'cache_status'} } )
+        {
+            $data{$site}{'cache_status'}{$cache_status} ||= 0;
+            print "${site}_${cache_status}.value "
+              . ( $data{$site}{'cache_status'}{$cache_status} || 0 ) . "\n";
+        }    # end cache_status
+    }    # end sites
+}    # end subgraph
+
+exit 0;
+
+# vim:syntax=perl
