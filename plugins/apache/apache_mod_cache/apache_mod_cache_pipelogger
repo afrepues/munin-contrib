@@ -1,0 +1,99 @@
+#!/usr/bin/perl
+
+=head1
+
+# Log vhost port method cache-status
+<IfModule mod_cache.c>
+  CustomLog "|/usr/share/munin/apache_mod_cache_pipelogger" "%v %p %m %{cache-status}e"
+</IfModule>
+
+=cut
+
+use Munin::Plugin;
+use Storable qw(freeze thaw);
+use IPC::ShareLite ':lock';
+
+#---------------------------------------------------------------------
+#  C O N F I G
+#---------------------------------------------------------------------
+
+my %config = (
+    'share_dir'  => $ENV{'share_dir'}  || '/var/lib/munin',
+    'share_file' => $ENV{'share_file'} || 'munin_apache_mod_cache',
+);
+
+#my $share = Cache::FastMmap->new(
+#	share_file => $config{share_dir} . "/" . $config{share_file},
+#	init_file => 1,
+#) or die $!;
+local $share = IPC::ShareLite->new(
+	-key     => 'mamc',
+	-create  => 1,
+	-destroy => 1,
+	-exclusive => 0,
+	-mode => '0666'
+) or die $!;
+
+while (<STDIN>) {
+    my ($vhost,$protocol,$cache_status)=split(/\s/,$_);
+
+    #$share->get_and_set('data', sub {
+    #    my %temp = $_;
+    # sanity check
+    #next unless m/^[\d\w\.\-_]+\s\w+\s[\w\-]+$/;       # escaped "." and "-"
+
+    # sitename to munin fieldname
+    my $vpm=clean_fieldname($vhost);
+
+    $share->lock(LOCK_EX);
+
+    my $stored = $share->fetch;
+    if ($stored eq "") {
+        %temp = ();
+    } else {
+        %temp = %{ thaw($stored) };
+    }
+
+    $temp{$vpm}{'label'} = $vhost;
+    # XXX: Should we be deciding what to clean up at this level?
+    #$temp{$vpm}{'label'} = ~s/www\.//;
+
+    # count all requests
+    $temp{$vpm}{'requests'}++;
+
+    # count by cache status
+    $temp{$vpm}{'cache_status'}{$cache_status}++;
+
+    $share->store( freeze \%temp );
+    $share->unlock;
+
+#    return %temp
+#    });
+};
+
+sub periodic_write {
+    my %data = $share->get('data');
+    print "So far: ";
+    print keys %data;
+    alarm $nsec;
+};
+
+sub update_data {
+    # get data
+    my %old=$_;
+
+    print "Updating data\n";
+    foreach my $vpm (keys %temp) {
+	# merge values
+	$old{$vpm}{'label'}=$temp{$vpm}{'label'};
+	$old{$vpm}{'requests'}+=$temp{$vpm}{'requests'};
+	$temp{$vpm}{'requests'}=0;
+
+	# reset statuses counts
+	foreach my $val (keys %{$temp{$vpm}{'cache_status'}}) {
+	    $old{$vpm}{'cache_status'}{$val}+=$temp{$vpm}{'cache_status'}{$val};
+	    $temp{$vpm}{'cache_status'}{$val}=0;
+	}
+    };
+    return %old;
+}
