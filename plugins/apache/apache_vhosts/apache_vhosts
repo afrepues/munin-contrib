@@ -95,9 +95,6 @@ if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
 need_multigraph();
 
 
-my ($config,$values);
-
-
 #
 # config
 #
