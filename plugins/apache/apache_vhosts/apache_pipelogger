@@ -10,12 +10,10 @@
 =cut
 # write every n seconds to shared memory
 local $nsec=7;
-local $debug=undef;
 
 use Storable qw(freeze thaw);
 use List::Util qw(min max);
 use IPC::ShareLite ':lock';
-require Data::Dumper if $debug;
 use Munin::Plugin;
 
 
@@ -113,7 +111,6 @@ sub periodic_write {
         };
 
         # save to shm
-#        print Data::Dumper::Dumper(%old) if $debug;
         $share->store( freeze \%old );
 
         # end transaction
