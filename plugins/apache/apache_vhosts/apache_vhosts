@@ -32,7 +32,7 @@ user root
 env.subgraphs requests bytes time
 env.checks requests bytes time
 
-# user		- probably necessary for shared memory IPC
+# user		- necessary for the creation of shared memory IPC
 # subgraphs 	- create multigraph subgraphs (watch your graphing performance...), default 0
 # checks	- enable stats on bytes and response times per request, you have to log these in apache
 
