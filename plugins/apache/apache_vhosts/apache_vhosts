@@ -80,8 +80,21 @@ my $share = IPC::ShareLite->new(
 ) or die $!;
 
 
+$share->lock(LOCK_EX);
 my $data = $share->fetch;
 my %data = ($data eq "") ? () : %{ thaw($data) };
+my %new_data = ();
+
+foreach my $site (keys %data) {
+  foreach my $check ( qw(requests bytes time max_bytes avg_bytes max_time avg_time) ) {
+    $new_data{$site}{$check}=0;
+  }
+  foreach my $val (keys %{$data{$site}{'status'}}) {
+     $new_data{$site}{'status'}{$val}=0;
+  }
+};
+$share->store( freeze \%new_data );
+$share->unlock();
 
 if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
   if (scalar(keys %data)>0) {
@@ -263,25 +276,6 @@ if ($subgraphs{'requests'}) {
   } # end sites
 } # end subgraph
 
-
-
-
-#
-# clear data after poll
-#
-
-foreach my $site (keys %data) {
-  foreach my $check ( qw(requests bytes time max_bytes avg_bytes max_time avg_time) ) {
-    $data{$site}{$check}=0;
-  }
-  foreach my $val (keys %{$data{$site}{'status'}}) {
-     $data{$site}{'status'}{$val}=0;
-  }
-};
-
-$share->lock(LOCK_EX);
-$share->store( freeze \%data );
-$share->unlock();
 
 exit 0;
 # vim:syntax=perl
