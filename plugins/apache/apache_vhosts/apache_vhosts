@@ -80,7 +80,8 @@ my $share = IPC::ShareLite->new(
 ) or die $!;
 
 
-my %data=eval{%{thaw($share->fetch)}};  # using eval to suppress thaw error on empty string at the first run
+my $data = $share->fetch;
+my %data = ($data eq "") ? () : %{ thaw($data) };
 
 if ( defined $ARGV[0] and $ARGV[0] eq "autoconf" ) {
   if (scalar(keys %data)>0) {
