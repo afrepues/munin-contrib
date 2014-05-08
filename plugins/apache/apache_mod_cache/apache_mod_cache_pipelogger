@@ -28,10 +28,11 @@ my $share = IPC::ShareLite->new(
 ) or die $!;
 
 while (<STDIN>) {
-    my ( $vhost, $protocol, $cache_status ) = split( /\s/, $_ );
+    my ( $vhost, $port, $http_verb, $mime_t, $cache_status ) = split( /\s/, $_ );
 
     # sanity check
-    next unless m/^[\d\w\.\-_]+\s\w+\s[\w-]+$/;
+    #next unless m/^[\d\w\.\-_]+\s\w+\s[\w-]+$/;
+    next unless m/^[^\s]+(\s+[^\s]+){4}$/;
 
     # sitename to munin fieldname
     my $vpm = clean_fieldname($vhost);
